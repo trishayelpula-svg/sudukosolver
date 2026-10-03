@@ -1,0 +1,100 @@
+<!DOCTYPE html>
+<html lang="en"><head><meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Task Dependency Visualizer</title>
+<style>
+*{box-sizing:border-box}body{font-family:system-ui,sans-serif;margin:0;background:#f4f6fa;color:#1c2333}
+header{background:#1f3a68;color:#fff;padding:14px 22px}header h1{margin:0;font-size:20px}header p{margin:4px 0 0;font-size:13px;opacity:.8}
+main{display:grid;grid-template-columns:300px 1fr;gap:14px;padding:14px}
+@media(max-width:800px){main{grid-template-columns:1fr}}
+.card{background:#fff;border-radius:10px;padding:14px;box-shadow:0 1px 4px #0002}
+textarea{width:100%;height:170px;font-family:monospace;font-size:14px;padding:8px;border:1px solid #bbc;border-radius:6px}
+button{background:#1f3a68;color:#fff;border:0;padding:8px 12px;border-radius:6px;cursor:pointer;margin:3px 3px 3px 0;font-size:13px}
+button.alt{background:#5b6b8c}button:hover{opacity:.85}
+h3{margin:10px 0 6px;font-size:14px}small{color:#556}
+svg{width:100%;height:380px;background:#fafbfe;border-radius:8px;border:1px solid #dde}
+#log{font-size:13px;background:#101828;color:#d6e2ff;padding:10px;border-radius:6px;height:120px;overflow:auto;font-family:monospace}
+.res{padding:10px;border-radius:6px;margin-top:8px;font-size:14px;min-height:40px}
+.ok{background:#dff5e4;border:1px solid #6bbf80}.bad{background:#fde1e1;border:1px solid #e07070}
+.legend span{display:inline-block;margin-right:10px;font-size:12px}.legend i{display:inline-block;width:12px;height:12px;border-radius:50%;vertical-align:middle;margin-right:4px;border:1px solid #444}
+</style></head><body>
+<header><h1>Task Dependency Visualizer</h1><p>Topological Sort (Kahn) + Depth-First Search cycle detection</p></header>
+<main>
+<div class="card">
+<h3>1. Enter dependencies</h3>
+<small>One per line: <code>A -> B</code> means A must finish before B. Chains like <code>A -> B -> C</code> work. A lone name adds an isolated task.</small>
+<textarea id="inp"></textarea>
+<div><button onclick="load(1)" class="alt">Sample: valid</button><button onclick="load(2)" class="alt">Sample: cycle</button></div>
+<h3>2. Run algorithm</h3>
+<button onclick="start('dfs')">DFS (cycle + order)</button>
+<button onclick="start('kahn')">Kahn's Topological Sort</button>
+<h3>3. Step through</h3>
+<button onclick="step(-1)" class="alt">◀ Prev</button><button onclick="step(1)">Next ▶</button>
+<button onclick="play()" class="alt" id="pb">Auto-play</button><button onclick="finish()" class="alt">Skip to end</button>
+<div id="msg" style="margin-top:8px;font-size:13px"></div>
+</div>
+<div class="card">
+<div class="legend"><span><i style="background:#fff"></i>Unvisited</span><span><i style="background:#ffd166"></i>In progress (on stack)</span><span><i style="background:#7bd389"></i>Finished / ordered</span><span><i style="background:#ff6b6b"></i>Cycle</span></div>
+<svg id="g"></svg>
+<h3>Algorithm log</h3><div id="log"></div>
+<div id="res" class="res"></div>
+</div></main>
+<script>
+const S1="Design -> Develop -> Test -> Deploy\nDesign -> Docs -> Deploy\nSetup -> Develop\nTraining";
+const S2="A -> B -> C -> D\nC -> E -> B\nF -> A";
+let nodes=[],edges=[],adj={},pos={},steps=[],cur=0,timer=null,mode='';
+const $=id=>document.getElementById(id);
+function load(n){$('inp').value=n==1?S1:S2;parse();draw({});$('log').innerHTML='';$('res').className='res';$('res').innerHTML='';steps=[];$('msg').textContent=''}
+function parse(){nodes=[];edges=[];adj={};const seen=new Set();
+ const add=n=>{if(!adj[n]){adj[n]=[];nodes.push(n)}};
+ $('inp').value.split('\n').forEach(l=>{const p=l.split('->').map(s=>s.trim()).filter(Boolean);p.forEach(add);
+  for(let i=0;i<p.length-1;i++){const k=p[i]+'>'+p[i+1];if(!seen.has(k)&&p[i]!==p[i+1]||p[i]===p[i+1]&&!seen.has(k)){seen.add(k);edges.push([p[i],p[i+1]]);adj[p[i]].push(p[i+1])}}});
+ layout()}
+function kahnOrder(){const d={};nodes.forEach(n=>d[n]=0);edges.forEach(e=>d[e[1]]++);const q=nodes.filter(n=>!d[n]),o=[];
+ while(q.length){const u=q.shift();o.push(u);adj[u].forEach(v=>{if(--d[v]==0)q.push(v)})}return o}
+function layout(){const W=700,H=380,o=kahnOrder();pos={};
+ if(o.length==nodes.length){const lv={};o.forEach(n=>lv[n]=0);o.forEach(u=>adj[u].forEach(v=>lv[v]=Math.max(lv[v],lv[u]+1)));
+  const cols={};nodes.forEach(n=>(cols[lv[n]]=cols[lv[n]]||[]).push(n));const nc=Object.keys(cols).length;
+  Object.entries(cols).forEach(([c,a])=>a.forEach((n,i)=>pos[n]={x:60+(W-120)*(nc>1?c/(nc-1):.5),y:H*(i+1)/(a.length+1)}))}
+ else nodes.forEach((n,i)=>{const a=2*Math.PI*i/nodes.length-Math.PI/2;pos[n]={x:W/2+240*Math.cos(a),y:H/2+150*Math.sin(a)}})}
+function draw(st){const col=st.col||{},hl=st.hl||[],cyc=st.cyc||[];
+ const cE=new Set();for(let i=0;i<cyc.length-1;i++)cE.add(cyc[i]+'>'+cyc[i+1]);
+ let s='<defs><marker id="a" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M0 0L10 5L0 10z" fill="#667"/></marker><marker id="r" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M0 0L10 5L0 10z" fill="#e03131"/></marker></defs>';
+ edges.forEach(([u,v])=>{const a=pos[u],b=pos[v];if(!a||!b)return;const dx=b.x-a.x,dy=b.y-a.y,L=Math.hypot(dx,dy)||1,r=24;
+  const bad=cE.has(u+'>'+v),on=hl[0]==u&&hl[1]==v;
+  s+=`<line x1="${a.x+dx/L*r}" y1="${a.y+dy/L*r}" x2="${b.x-dx/L*(r+2)}" y2="${b.y-dy/L*(r+2)}" stroke="${bad?'#e03131':on?'#1f3a68':'#99a'}" stroke-width="${bad||on?3:1.8}" marker-end="url(#${bad?'r':'a'})"/>`});
+ nodes.forEach(n=>{const p=pos[n];const c=cyc.includes(n)?'#ff6b6b':col[n]=='g'?'#ffd166':col[n]=='b'?'#7bd389':'#fff';
+  s+=`<circle cx="${p.x}" cy="${p.y}" r="24" fill="${c}" stroke="#1f3a68" stroke-width="2"/><text x="${p.x}" y="${p.y+4}" text-anchor="middle" font-size="${n.length>6?9:12}" font-weight="600">${n.length>9?n.slice(0,8)+'…':n}</text>`});
+ $('g').setAttribute('viewBox','0 0 700 380');$('g').innerHTML=s}
+function buildDFS(){const col={},order=[],T=[];let cyc=null;nodes.forEach(n=>col[n]='w');const stack=[];
+ const snap=(t,hl)=>T.push({col:{...col},text:t,hl:hl||[],cyc:cyc||[],order:[...order].reverse()});
+ function dfs(u){col[u]='g';stack.push(u);snap(`Visit ${u}: mark in-progress, push on stack`);
+  for(const v of adj[u]){if(col[v]=='w'){snap(`Edge ${u}→${v}: ${v} unvisited, go deeper`,[u,v]);dfs(v)}
+   else if(col[v]=='g'){if(!cyc)cyc=[...stack.slice(stack.indexOf(v)),v];snap(`Edge ${u}→${v}: ${v} is still on the stack = BACK EDGE → CYCLE!`,[u,v])}
+   else snap(`Edge ${u}→${v}: ${v} already finished, skip`,[u,v])}
+  stack.pop();col[u]='b';order.push(u);snap(`Finish ${u}: add to finish list (topological order = reverse of finish order)`)}
+ nodes.forEach(n=>{if(col[n]=='w')dfs(n)});
+ const fin=cyc?`CYCLE DETECTED: ${cyc.join(' → ')}. No valid schedule exists.`:`No cycle. Valid order: ${[...order].reverse().join(' → ')}`;
+ T.push({col:{...col},text:fin,hl:[],cyc:cyc||[],final:fin,bad:!!cyc,order:[...order].reverse()});return T}
+function buildKahn(){const d={},T=[],o=[];nodes.forEach(n=>d[n]=0);edges.forEach(e=>d[e[1]]++);const col={};nodes.forEach(n=>col[n]='w');
+ const q=nodes.filter(n=>!d[n]);const dstr=()=>nodes.map(n=>`${n}:${d[n]}`).join(' ');
+ T.push({col:{...col},text:`In-degrees → ${dstr()}. Queue (in-degree 0) = [${q}]`,hl:[],cyc:[]});
+ q.forEach(n=>col[n]='g');
+ while(q.length){const u=q.shift();o.push(u);col[u]='b';
+  T.push({col:{...col},text:`Dequeue ${u}: place #${o.length} in order, remove its outgoing edges`,hl:[],cyc:[]});
+  adj[u].forEach(v=>{d[v]--;let t=`Edge ${u}→${v}: in-degree of ${v} becomes ${d[v]}`;if(!d[v]){q.push(v);col[v]='g';t+=` → enqueue ${v}`}T.push({col:{...col},text:t,hl:[u,v],cyc:[]})})}
+ const stuck=nodes.filter(n=>!o.includes(n));
+ let fin,bad=false;if(stuck.length){bad=true;fin=`Only ${o.length} of ${nodes.length} tasks ordered. Tasks stuck with in-degree > 0: ${stuck.join(', ')} → they lie on/behind a CYCLE. No valid schedule.`}
+ else fin=`All ${nodes.length} tasks ordered: ${o.join(' → ')}`;
+ T.push({col:{...col},text:fin,hl:[],cyc:bad?stuck:[],final:fin,bad});return T}
+function start(m){parse();if(!nodes.length){$('msg').textContent='Enter some tasks first.';return}
+ stop();mode=m;steps=m=='dfs'?buildDFS():buildKahn();cur=-1;$('log').innerHTML='';$('res').className='res';$('res').innerHTML='';step(1)}
+function show(){const s=steps[cur];if(!s)return;draw(s);$('msg').textContent=`${mode=='dfs'?'DFS':'Kahn'} — step ${cur+1}/${steps.length}`;
+ $('log').innerHTML=steps.slice(0,cur+1).map((x,i)=>`<div>${i+1}. ${x.text}</div>`).join('');$('log').scrollTop=1e6;
+ if(s.final){$('res').className='res '+(s.bad?'bad':'ok');$('res').innerHTML=(s.bad?'❌ ':'✅ ')+s.final}else{$('res').className='res';$('res').innerHTML=''}}
+function step(d){if(!steps.length)return;cur=Math.max(0,Math.min(steps.length-1,cur+d));show();if(cur==steps.length-1)stop()}
+function finish(){if(steps.length){cur=steps.length-1;show();stop()}}
+function stop(){clearInterval(timer);timer=null;$('pb').textContent='Auto-play'}
+function play(){if(timer)return stop();if(!steps.length)return;if(cur>=steps.length-1)cur=-1;$('pb').textContent='Pause';timer=setInterval(()=>step(1),900)}
+load(1);
+</script></body></html>
